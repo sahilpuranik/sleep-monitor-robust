@@ -1,0 +1,35 @@
+[Unit]
+Description=Sleep Monitor Environment Detector
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/sleepmon
+Environment=PYTHONPATH=/home/pi/sleepmon
+ExecStart=/usr/bin/python3 /home/pi/sleepmon/run_detector.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sleepmon
+
+# Environment variables for email alerts
+Environment=SMTP_USER=your.email@gmail.com
+Environment=SMTP_PASS_APP=your-app-password
+Environment=ALERT_TO=alert.recipient@gmail.com
+
+# Optional: Customize thresholds
+# Environment=ROBUST_Z_THRESHOLD=6
+# Environment=TEMP_ROC_LIMIT=3
+# Environment=HUMIDITY_ROC_LIMIT=8
+# Environment=TEMP_MIN=50
+# Environment=TEMP_MAX=90
+# Environment=HUMIDITY_MIN=10
+# Environment=HUMIDITY_MAX=85
+# Environment=COOLDOWN_MINUTES=15
+
+[Install]
+WantedBy=multi-user.target
