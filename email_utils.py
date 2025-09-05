@@ -8,7 +8,7 @@ import smtplib
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
 
@@ -26,10 +26,19 @@ class EmailAlertManager:
         else:
             self.enabled = True
             logger.info(f"Email alerts configured for: {self.alert_to}")
+        
+        # Initialize LLM enhancer
+        try:
+            from llm_utils import LLMAlertEnhancer
+            self.llm_enhancer = LLMAlertEnhancer()
+        except ImportError:
+            logger.warning("LLM utilities not available. Alerts will use raw format.")
+            self.llm_enhancer = None
     
-    def send_anomaly_alert(self, anomalies: List[Dict[str, Any]]) -> bool:
+    def send_anomaly_alert(self, anomalies: List[Dict[str, Any]], 
+                          sensor_context: Optional[List[Dict[str, Any]]] = None) -> bool:
         """
-        Send email alert for detected anomalies
+        Send email alert for detected anomalies with optional LLM enhancement
         Returns True if email was sent successfully
         """
         if not self.enabled:
@@ -43,7 +52,12 @@ class EmailAlertManager:
         try:
             # Create email content
             subject = f"Sleep Monitor Alert - {len(anomalies)} Anomaly(ies) Detected"
-            body = self._create_alert_body(anomalies)
+            
+            # Use LLM enhancement if available
+            if self.llm_enhancer:
+                body = self.llm_enhancer.enhance_anomaly_alert(anomalies, sensor_context)
+            else:
+                body = self._create_alert_body(anomalies)
             
             # Send email
             success = self._send_email(subject, body)

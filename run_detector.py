@@ -237,9 +237,12 @@ class SleepMonitorDetector:
                 elif anomaly['metric'] == 'pressure':
                     self.db.set_config('last_alert_pressure', anomaly['ts_utc'])
             
-            # Send email alert
+            # Prepare sensor context for LLM analysis
+            sensor_context = self._prepare_sensor_context()
+            
+            # Send email alert with sensor context
             if self.email_manager.enabled:
-                success = self.email_manager.send_anomaly_alert(anomalies)
+                success = self.email_manager.send_anomaly_alert(anomalies, sensor_context)
                 if success:
                     logger.info("Email alert sent successfully")
                 else:
@@ -249,6 +252,26 @@ class SleepMonitorDetector:
             
         except Exception as e:
             logger.error(f"Error handling anomalies: {e}")
+    
+    def _prepare_sensor_context(self):
+        """Prepare sensor context data for LLM analysis"""
+        try:
+            # Get recent readings from buffer (last 5 minutes)
+            context_data = []
+            
+            for reading in self.reading_buffer:
+                context_data.append({
+                    'timestamp': reading[0],
+                    'temp_f': reading[1],
+                    'humidity': reading[2],
+                    'pressure': reading[3]
+                })
+            
+            return context_data
+            
+        except Exception as e:
+            logger.error(f"Error preparing sensor context: {e}")
+            return []
     
     def run(self):
         """Main monitoring loop"""

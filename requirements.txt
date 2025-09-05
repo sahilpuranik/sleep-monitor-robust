@@ -4,3 +4,4 @@ adafruit-circuitpython-register==1.9.16
 adafruit-blinka==8.32.0
 pyserial==3.5
 numpy==1.24.3
+openai==0.28.1
