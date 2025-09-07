@@ -46,6 +46,7 @@ class SleepMonitorDetector:
         # Anomaly tracking
         self.last_alert_times = defaultdict(str)
         self.anomaly_count = 0
+        self.session_anomalies = []  # Collect all anomalies for batch processing
         
         # Rolling window for anomaly detection (5 minutes)
         self.rolling_window_minutes = 5
@@ -212,7 +213,7 @@ class SleepMonitorDetector:
             return []
     
     def handle_anomalies(self, anomalies):
-        """Handle detected anomalies"""
+        """Handle detected anomalies - collect for batch processing"""
         if not anomalies:
             return
         
@@ -237,17 +238,8 @@ class SleepMonitorDetector:
                 elif anomaly['metric'] == 'pressure':
                     self.db.set_config('last_alert_pressure', anomaly['ts_utc'])
             
-            # Prepare sensor context for LLM analysis
-            sensor_context = self._prepare_sensor_context()
-            
-            # Send email alert with sensor context
-            if self.email_manager.enabled:
-                success = self.email_manager.send_anomaly_alert(anomalies, sensor_context)
-                if success:
-                    logger.info("Email alert sent successfully")
-                else:
-                    logger.error("Failed to send email alert")
-            
+            # Collect anomalies for batch processing at shutdown
+            self.session_anomalies.extend(anomalies)
             self.anomaly_count += len(anomalies)
             
         except Exception as e:
@@ -325,13 +317,31 @@ class SleepMonitorDetector:
             self.shutdown()
     
     def shutdown(self):
-        """Cleanup and shutdown"""
+        """Cleanup and shutdown with batch anomaly processing"""
         if self.start_time:
             duration = datetime.now() - self.start_time
             logger.info(f"Monitoring completed. Duration: {duration}")
         
         logger.info(f"Total readings: {self.reading_count}")
         logger.info(f"Total anomalies detected: {self.anomaly_count}")
+        
+        # Process all collected anomalies with single API call
+        if self.email_manager.enabled:
+            if self.session_anomalies:
+                logger.info(f"Processing {len(self.session_anomalies)} anomalies for batch email")
+                sensor_context = self._prepare_sensor_context()
+                success = self.email_manager.send_batch_anomaly_alert(self.session_anomalies, sensor_context)
+                if success:
+                    logger.info("Batch anomaly email sent successfully")
+                else:
+                    logger.error("Failed to send batch anomaly email")
+            else:
+                logger.info("No anomalies detected - sending no-anomaly email")
+                success = self.email_manager.send_no_anomaly_alert()
+                if success:
+                    logger.info("No-anomaly email sent successfully")
+                else:
+                    logger.error("Failed to send no-anomaly email")
         
         # Close database connection
         self.db.close()

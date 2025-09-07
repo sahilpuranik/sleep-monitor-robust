@@ -43,12 +43,55 @@ class LLMAlertEnhancer:
             logger.error(f"LLM enhancement failed: {e}")
             return self._fallback_alert_format(anomalies)
     
+    def enhance_batch_anomaly_alert(self, anomalies: List[Dict[str, Any]], 
+                                   sensor_context: Optional[List[Dict[str, Any]]] = None) -> str:
+        """
+        Generate human-readable explanation for batch anomalies using OpenAI API
+        Returns enhanced alert text or falls back to raw format if API fails
+        """
+        if not self.enabled or not anomalies:
+            return self._fallback_batch_alert_format(anomalies)
+        
+        try:
+            # Prepare context for LLM
+            context = self._prepare_batch_context(anomalies, sensor_context)
+            
+            # Generate explanation
+            explanation = self._call_openai_api(context)
+            
+            return explanation
+            
+        except Exception as e:
+            logger.error(f"LLM batch enhancement failed: {e}")
+            return self._fallback_batch_alert_format(anomalies)
+    
     def _prepare_context(self, anomalies: List[Dict[str, Any]], 
                         sensor_context: Optional[List[Dict[str, Any]]]) -> str:
         """Prepare context string for OpenAI API"""
         
         # Basic anomaly information
         context = "Sleep environment anomalies detected:\n\n"
+        
+        for i, anomaly in enumerate(anomalies, 1):
+            context += f"{i}. {anomaly['metric'].upper()}: {anomaly['value']} "
+            context += f"(Rule: {anomaly['rule']}, Details: {anomaly['details']})\n"
+        
+        # Add sensor context if available
+        if sensor_context:
+            context += "\nRecent sensor readings (last 5 minutes):\n"
+            for reading in sensor_context[-10:]:  # Last 10 readings
+                context += f"  {reading['timestamp']}: Temp {reading['temp_f']:.1f}°F, "
+                context += f"Humidity {reading['humidity']:.1f}%, "
+                context += f"Pressure {reading['pressure']:.1f}hPa\n"
+        
+        return context
+    
+    def _prepare_batch_context(self, anomalies: List[Dict[str, Any]], 
+                              sensor_context: Optional[List[Dict[str, Any]]]) -> str:
+        """Prepare context string for OpenAI API batch processing"""
+        
+        # Basic anomaly information
+        context = f"Sleep environment monitoring session completed with {len(anomalies)} total anomalies detected:\n\n"
         
         for i, anomaly in enumerate(anomalies, 1):
             context += f"{i}. {anomaly['metric'].upper()}: {anomaly['value']} "
@@ -73,7 +116,21 @@ class LLMAlertEnhancer:
             openai.api_key = self.api_key
             
             # Create prompt
-            prompt = f"""
+            if "monitoring session completed" in context:
+                prompt = f"""
+You are a sleep environment monitoring system. Analyze the following night's monitoring session and provide a clear, concise summary for the user.
+
+{context}
+
+Provide:
+1. A brief summary of the night's monitoring results
+2. Overall patterns or trends in the anomalies
+3. Suggested actions if any
+
+Keep the response under 250 words, use simple language, and focus on practical insights. Do not include technical jargon or statistical details.
+"""
+            else:
+                prompt = f"""
 You are a sleep environment monitoring system. Analyze the following anomaly data and provide a clear, concise explanation for the user.
 
 {context}
@@ -156,6 +213,37 @@ Anomalies Detected: {len(anomalies)}
 Sleep Monitor System
 Raspberry Pi Environment Monitor
 This is an automated alert - please check your sleep environment.
+"""
+        
+        return body.strip()
+    
+    def _fallback_batch_alert_format(self, anomalies: List[Dict[str, Any]]) -> str:
+        """Fallback to raw batch anomaly format if LLM is unavailable"""
+        current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        
+        body = f"""
+SLEEP MONITOR NIGHT SUMMARY
+
+Time: {current_time}
+Total Anomalies Detected: {len(anomalies)}
+
+"""
+        
+        for i, anomaly in enumerate(anomalies, 1):
+            body += f"""
+{i}. {anomaly['metric'].upper()} ANOMALY
+   Time: {anomaly['ts_utc']}
+   Value: {anomaly['value']}
+   Rule: {anomaly['rule']}
+   Details: {anomaly['details']}
+"""
+        
+        body += f"""
+
+---
+Sleep Monitor System
+Raspberry Pi Environment Monitor
+This is an automated summary of your sleep environment monitoring session.
 """
         
         return body.strip()

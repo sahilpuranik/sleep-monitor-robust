@@ -73,6 +73,70 @@ class EmailAlertManager:
             logger.error(f"Error sending alert email: {e}")
             return False
     
+    def send_batch_anomaly_alert(self, anomalies: List[Dict[str, Any]], 
+                                sensor_context: Optional[List[Dict[str, Any]]] = None) -> bool:
+        """
+        Send batch email alert for all anomalies collected during session
+        Returns True if email was sent successfully
+        """
+        if not self.enabled:
+            logger.warning("Email alerts disabled - skipping batch alert")
+            return False
+        
+        if not anomalies:
+            logger.info("No anomalies to alert about")
+            return False
+        
+        try:
+            # Create email content
+            subject = f"Sleep Monitor Night Summary - {len(anomalies)} Anomaly(ies) Detected"
+            
+            # Use LLM enhancement if available
+            if self.llm_enhancer:
+                body = self.llm_enhancer.enhance_batch_anomaly_alert(anomalies, sensor_context)
+            else:
+                body = self._create_batch_alert_body(anomalies)
+            
+            # Send email
+            success = self._send_email(subject, body)
+            
+            if success:
+                logger.info(f"Batch alert email sent successfully for {len(anomalies)} anomalies")
+            else:
+                logger.error("Failed to send batch alert email")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error sending batch alert email: {e}")
+            return False
+    
+    def send_no_anomaly_alert(self) -> bool:
+        """
+        Send email notification when no anomalies were detected during session
+        Returns True if email was sent successfully
+        """
+        if not self.enabled:
+            logger.warning("Email alerts disabled - skipping no-anomaly alert")
+            return False
+        
+        try:
+            subject = "Sleep Monitor Night Summary - No Anomalies Detected"
+            body = self._create_no_anomaly_body()
+            
+            success = self._send_email(subject, body)
+            
+            if success:
+                logger.info("No-anomaly email sent successfully")
+            else:
+                logger.error("Failed to send no-anomaly email")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error sending no-anomaly email: {e}")
+            return False
+    
     def _create_alert_body(self, anomalies: List[Dict[str, Any]]) -> str:
         """Create formatted email body for anomalies"""
         current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -100,6 +164,57 @@ Anomalies Detected: {len(anomalies)}
 Sleep Monitor System
 Raspberry Pi Environment Monitor
 This is an automated alert - please check your sleep environment.
+"""
+        
+        return body.strip()
+    
+    def _create_batch_alert_body(self, anomalies: List[Dict[str, Any]]) -> str:
+        """Create formatted email body for batch anomalies"""
+        current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        
+        body = f"""
+SLEEP MONITOR NIGHT SUMMARY
+
+Time: {current_time}
+Total Anomalies Detected: {len(anomalies)}
+
+"""
+        
+        for i, anomaly in enumerate(anomalies, 1):
+            body += f"""
+{i}. {anomaly['metric'].upper()} ANOMALY
+   Time: {anomaly['ts_utc']}
+   Value: {anomaly['value']}
+   Rule: {anomaly['rule']}
+   Details: {anomaly['details']}
+"""
+        
+        body += f"""
+
+---
+Sleep Monitor System
+Raspberry Pi Environment Monitor
+This is an automated summary of your sleep environment monitoring session.
+"""
+        
+        return body.strip()
+    
+    def _create_no_anomaly_body(self) -> str:
+        """Create formatted email body for no anomalies detected"""
+        current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        
+        body = f"""
+SLEEP MONITOR NIGHT SUMMARY
+
+Time: {current_time}
+Status: No anomalies detected tonight
+
+Your sleep environment remained within normal parameters throughout the monitoring session.
+
+---
+Sleep Monitor System
+Raspberry Pi Environment Monitor
+This is an automated summary of your sleep environment monitoring session.
 """
         
         return body.strip()
