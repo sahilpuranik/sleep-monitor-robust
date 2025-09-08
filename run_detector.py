@@ -39,7 +39,11 @@ class SleepMonitorDetector:
         self.db = DatabaseManager(db_path)
         self.email_manager = EmailAlertManager()
         self.running = False
-        self.sensor = None
+        self.sensors = {
+            'bme280': None,
+            'tsl2591': None,
+            'inmp441': None
+        }
         self.reading_count = 0
         self.start_time = None
         
@@ -61,8 +65,11 @@ class SleepMonitorDetector:
         logger.info(f"Received signal {signum}, shutting down gracefully...")
         self.running = False
     
-    def initialize_sensor(self):
-        """Initialize BME280 sensor"""
+    def initialize_sensors(self):
+        """Initialize all available sensors"""
+        sensors_initialized = 0
+        
+        # Initialize BME280 sensor
         try:
             import board
             import busio
@@ -72,51 +79,129 @@ class SleepMonitorDetector:
             i2c = busio.I2C(board.SCL, board.SDA)
             
             # Initialize BME280 sensor
-            self.sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
+            self.sensors['bme280'] = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
             
             # Set sensor configuration for high accuracy
-            self.sensor.sea_level_pressure = 1013.25
-            self.sensor.mode = adafruit_bme280.MODE_NORMAL
-            self.sensor.standby_period = adafruit_bme280.STANDBY_TC_500
-            self.sensor.iir_filter = adafruit_bme280.IIR_FILTER_X16
-            self.sensor.overscan_pressure = adafruit_bme280.OVERSCAN_X16
-            self.sensor.overscan_humidity = adafruit_bme280.OVERSCAN_X1
-            self.sensor.overscan_temperature = adafruit_bme280.OVERSCAN_X2
+            self.sensors['bme280'].sea_level_pressure = 1013.25
+            self.sensors['bme280'].mode = adafruit_bme280.MODE_NORMAL
+            self.sensors['bme280'].standby_period = adafruit_bme280.STANDBY_TC_500
+            self.sensors['bme280'].iir_filter = adafruit_bme280.IIR_FILTER_X16
+            self.sensors['bme280'].overscan_pressure = adafruit_bme280.OVERSCAN_X16
+            self.sensors['bme280'].overscan_humidity = adafruit_bme280.OVERSCAN_X1
+            self.sensors['bme280'].overscan_temperature = adafruit_bme280.OVERSCAN_X2
             
             logger.info("BME280 sensor initialized successfully")
-            return True
+            sensors_initialized += 1
             
         except ImportError as e:
-            logger.error(f"Failed to import BME280 libraries: {e}")
-            logger.error("Make sure you have installed: pip3 install adafruit-circuitpython-bme280")
-            return False
+            logger.warning(f"BME280 libraries not available: {e}")
         except Exception as e:
-            logger.error(f"Failed to initialize BME280 sensor: {e}")
-            return False
-    
-    def read_sensor(self):
-        """Read current sensor values"""
+            logger.warning(f"Failed to initialize BME280 sensor: {e}")
+        
+        # Initialize TSL2591 light sensor
         try:
-            if not self.sensor:
-                return None
+            from adafruit_tsl2591 import TSL2591
             
-            # Read sensor values
-            temp_c = self.sensor.temperature
-            humidity = self.sensor.relative_humidity
-            pressure = self.sensor.pressure
+            # Use existing I2C bus
+            if 'i2c' not in locals():
+                import board
+                import busio
+                i2c = busio.I2C(board.SCL, board.SDA)
             
-            # Convert temperature to Fahrenheit
-            temp_f = celsius_to_fahrenheit(temp_c)
+            # Initialize TSL2591 sensor
+            self.sensors['tsl2591'] = TSL2591(i2c)
             
-            return {
-                'temp_f': temp_f,
-                'humidity': humidity,
-                'pressure': pressure
-            }
+            # Set sensor configuration for high accuracy
+            self.sensors['tsl2591'].gain = 0x01  # Low gain (1x) for high light levels
+            self.sensors['tsl2591'].integration_time = 0x02  # 200ms integration time
             
+            logger.info("TSL2591 light sensor initialized successfully")
+            sensors_initialized += 1
+            
+        except ImportError as e:
+            logger.warning(f"TSL2591 libraries not available: {e}")
         except Exception as e:
-            logger.error(f"Error reading sensor: {e}")
+            logger.warning(f"Failed to initialize TSL2591 sensor: {e}")
+        
+        # Initialize INMP441 microphone
+        try:
+            import audiobusio
+            
+            # Initialize I2S microphone
+            self.sensors['inmp441'] = audiobusio.I2SOut(
+                board.D18,  # Bit clock (BCLK)
+                board.D19,  # Word select (WS/LRCLK) 
+                board.D20   # Data (DIN)
+            )
+            
+            logger.info("INMP441 microphone initialized successfully")
+            sensors_initialized += 1
+            
+        except ImportError as e:
+            logger.warning(f"I2S libraries not available: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize INMP441 microphone: {e}")
+        
+        if sensors_initialized == 0:
+            logger.error("No sensors could be initialized")
+            return False
+        
+        logger.info(f"Successfully initialized {sensors_initialized} sensor(s)")
+        return True
+    
+    def read_sensors(self):
+        """Read current values from all available sensors"""
+        reading = {
+            'temp_f': None,
+            'humidity': None,
+            'pressure': None,
+            'lux': None,
+            'full_spectrum': None,
+            'ir': None,
+            'sound_rms': None
+        }
+        
+        # Read BME280 sensor
+        if self.sensors['bme280']:
+            try:
+                temp_c = self.sensors['bme280'].temperature
+                reading['temp_f'] = celsius_to_fahrenheit(temp_c)
+                reading['humidity'] = self.sensors['bme280'].relative_humidity
+                reading['pressure'] = self.sensors['bme280'].pressure
+            except Exception as e:
+                logger.warning(f"Error reading BME280: {e}")
+        
+        # Read TSL2591 light sensor
+        if self.sensors['tsl2591']:
+            try:
+                reading['lux'] = self.sensors['tsl2591'].lux
+                reading['full_spectrum'] = self.sensors['tsl2591'].full_spectrum
+                reading['ir'] = self.sensors['tsl2591'].infrared
+            except Exception as e:
+                logger.warning(f"Error reading TSL2591: {e}")
+        
+        # Read INMP441 microphone
+        if self.sensors['inmp441']:
+            try:
+                import math
+                # Record audio samples for 1 second
+                sample_rate = 8000
+                samples = []
+                for _ in range(sample_rate):
+                    sample = self.sensors['inmp441'].record(1)[0]
+                    samples.append(sample)
+                
+                # Calculate RMS amplitude
+                sum_squares = sum(sample * sample for sample in samples)
+                reading['sound_rms'] = math.sqrt(sum_squares / len(samples))
+            except Exception as e:
+                logger.warning(f"Error reading INMP441: {e}")
+        
+        # Return None if no sensors are working
+        if all(v is None for v in reading.values()):
             return None
+        
+        return reading
     
     def store_reading(self, reading):
         """Store sensor reading in database"""
@@ -129,11 +214,25 @@ class SleepMonitorDetector:
                 ts_utc=ts_utc,
                 temp_f=reading['temp_f'],
                 humidity=reading['humidity'],
-                pressure=reading['pressure']
+                pressure=reading['pressure'],
+                lux=reading['lux'],
+                full_spectrum=reading['full_spectrum'],
+                ir=reading['ir'],
+                sound_rms=reading['sound_rms']
             )
             
-            # Add to rolling buffer
-            self.reading_buffer.append((ts_utc, reading['temp_f'], reading['humidity'], reading['pressure']))
+            # Add to rolling buffer (create tuple with all values)
+            buffer_reading = (
+                ts_utc, 
+                reading['temp_f'], 
+                reading['humidity'], 
+                reading['pressure'],
+                reading['lux'],
+                reading['full_spectrum'],
+                reading['ir'],
+                reading['sound_rms']
+            )
+            self.reading_buffer.append(buffer_reading)
             
             # Keep only last 5 minutes of readings
             cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=self.rolling_window_minutes)
@@ -154,8 +253,12 @@ class SleepMonitorDetector:
             config_keys = [
                 'baseline_temp_f_med', 'baseline_temp_f_mad', 'baseline_temp_f_std',
                 'baseline_hum_med', 'baseline_hum_mad', 'baseline_hum_std',
+                'baseline_lux_med', 'baseline_lux_mad', 'baseline_lux_std',
+                'baseline_sound_med', 'baseline_sound_mad', 'baseline_sound_std',
                 'robust_z_threshold', 'temp_roc_limit', 'humidity_roc_limit',
-                'temp_min', 'temp_max', 'humidity_min', 'humidity_max', 'cooldown_minutes'
+                'lux_roc_limit', 'sound_roc_limit',
+                'temp_min', 'temp_max', 'humidity_min', 'humidity_max',
+                'lux_min', 'lux_max', 'sound_min', 'sound_max', 'cooldown_minutes'
             ]
             
             for key in config_keys:
@@ -192,14 +295,22 @@ class SleepMonitorDetector:
                 'temp_f_std': float(config.get('baseline_temp_f_std', 0)),
                 'hum_med': float(config.get('baseline_hum_med', 0)),
                 'hum_mad': float(config.get('baseline_hum_mad', 0)),
-                'hum_std': float(config.get('baseline_hum_std', 0))
+                'hum_std': float(config.get('baseline_hum_std', 0)),
+                'lux_med': float(config.get('baseline_lux_med', 0)),
+                'lux_mad': float(config.get('baseline_lux_mad', 0)),
+                'lux_std': float(config.get('baseline_lux_std', 0)),
+                'sound_med': float(config.get('baseline_sound_med', 0)),
+                'sound_mad': float(config.get('baseline_sound_mad', 0)),
+                'sound_std': float(config.get('baseline_sound_std', 0))
             }
             
             # Get last alert times from config
             last_alert_times = {
                 'temp': self.db.get_config('last_alert_temp') or '',
                 'humidity': self.db.get_config('last_alert_humidity') or '',
-                'pressure': self.db.get_config('last_alert_pressure') or ''
+                'pressure': self.db.get_config('last_alert_pressure') or '',
+                'lux': self.db.get_config('last_alert_lux') or '',
+                'sound': self.db.get_config('last_alert_sound') or ''
             }
             
             # Check most recent reading for anomalies
@@ -237,6 +348,10 @@ class SleepMonitorDetector:
                     self.db.set_config('last_alert_humidity', anomaly['ts_utc'])
                 elif anomaly['metric'] == 'pressure':
                     self.db.set_config('last_alert_pressure', anomaly['ts_utc'])
+                elif anomaly['metric'] == 'lux':
+                    self.db.set_config('last_alert_lux', anomaly['ts_utc'])
+                elif anomaly['metric'] == 'sound_rms':
+                    self.db.set_config('last_alert_sound', anomaly['ts_utc'])
             
             # Collect anomalies for batch processing at shutdown
             self.session_anomalies.extend(anomalies)
@@ -256,7 +371,11 @@ class SleepMonitorDetector:
                     'timestamp': reading[0],
                     'temp_f': reading[1],
                     'humidity': reading[2],
-                    'pressure': reading[3]
+                    'pressure': reading[3],
+                    'lux': reading[4] if len(reading) > 4 else None,
+                    'full_spectrum': reading[5] if len(reading) > 5 else None,
+                    'ir': reading[6] if len(reading) > 6 else None,
+                    'sound_rms': reading[7] if len(reading) > 7 else None
                 })
             
             return context_data
@@ -276,8 +395,8 @@ class SleepMonitorDetector:
             logger.error("No baseline configuration found. Please run 'python3 build_baseline.py' first.")
             return
         
-        if not self.initialize_sensor():
-            logger.error("Failed to initialize sensor. Exiting.")
+        if not self.initialize_sensors():
+            logger.error("Failed to initialize any sensors. Exiting.")
             return
         
         self.running = True
@@ -288,12 +407,27 @@ class SleepMonitorDetector:
         
         try:
             while self.running:
-                # Read sensor
-                reading = self.read_sensor()
+                # Read sensors
+                reading = self.read_sensors()
                 
                 if reading:
-                    # Display current values
-                    print(f"\rTemp: {reading['temp_f']:.1f}°F  Humidity: {reading['humidity']:.1f}%  Pressure: {reading['pressure']:.1f}hPa  Readings: {self.reading_count}  Anomalies: {self.anomaly_count}", end="", flush=True)
+                    # Display current values (only show non-None values)
+                    display_parts = []
+                    if reading['temp_f'] is not None:
+                        display_parts.append(f"Temp: {reading['temp_f']:.1f}°F")
+                    if reading['humidity'] is not None:
+                        display_parts.append(f"Humidity: {reading['humidity']:.1f}%")
+                    if reading['pressure'] is not None:
+                        display_parts.append(f"Pressure: {reading['pressure']:.1f}hPa")
+                    if reading['lux'] is not None:
+                        display_parts.append(f"Lux: {reading['lux']:.1f}")
+                    if reading['sound_rms'] is not None:
+                        display_parts.append(f"Sound: {reading['sound_rms']:.1f}")
+                    
+                    display_parts.append(f"Readings: {self.reading_count}")
+                    display_parts.append(f"Anomalies: {self.anomaly_count}")
+                    
+                    print(f"\r{'  '.join(display_parts)}", end="", flush=True)
                     
                     # Store reading
                     self.store_reading(reading)
@@ -304,7 +438,7 @@ class SleepMonitorDetector:
                         if anomalies:
                             self.handle_anomalies(anomalies)
                 else:
-                    logger.warning("Failed to read sensor")
+                    logger.warning("Failed to read any sensors")
                 
                 # Wait 1 second
                 time.sleep(1)

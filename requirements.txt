@@ -1,4 +1,5 @@
 adafruit-circuitpython-bme280==3.6.8
+adafruit-circuitpython-tsl2591==3.4.8
 adafruit-circuitpython-busdevice==5.2.6
 adafruit-circuitpython-register==1.9.16
 adafruit-blinka==8.32.0

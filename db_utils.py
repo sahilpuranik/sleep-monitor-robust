@@ -70,22 +70,69 @@ class DatabaseManager:
         )
         self.commit()
     
-    def insert_reading(self, ts_utc: str, temp_f: float, humidity: float, pressure: float):
+    def insert_reading(self, ts_utc: str, temp_f: float, humidity: float, pressure: float, 
+                      lux: float = None, full_spectrum: float = None, ir: float = None, 
+                      sound_rms: float = None):
         """Insert a single sensor reading"""
         self.execute(
-            "INSERT OR REPLACE INTO readings (ts_utc, temp_f, humidity, pressure) VALUES (?, ?, ?, ?)",
-            (ts_utc, temp_f, humidity, pressure)
+            """INSERT OR REPLACE INTO readings 
+               (ts_utc, temp_f, humidity, pressure, lux, full_spectrum, ir, sound_rms) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (ts_utc, temp_f, humidity, pressure, lux, full_spectrum, ir, sound_rms)
         )
+        self.commit()
+    
+    def insert_light_reading(self, ts_utc: str, lux: float, full_spectrum: float, ir: float):
+        """Insert light sensor reading (updates existing record or creates new one)"""
+        # First try to update existing record
+        cursor = self.execute(
+            "UPDATE readings SET lux = ?, full_spectrum = ?, ir = ? WHERE ts_utc = ?",
+            (lux, full_spectrum, ir, ts_utc)
+        )
+        
+        # If no existing record, create new one with NULL values for other sensors
+        if cursor.rowcount == 0:
+            self.execute(
+                """INSERT INTO readings 
+                   (ts_utc, temp_f, humidity, pressure, lux, full_spectrum, ir, sound_rms) 
+                   VALUES (?, NULL, NULL, NULL, ?, ?, ?, NULL)""",
+                (ts_utc, lux, full_spectrum, ir)
+            )
+        
+        self.commit()
+    
+    def insert_sound_reading(self, ts_utc: str, sound_rms: float):
+        """Insert sound sensor reading (updates existing record or creates new one)"""
+        # First try to update existing record
+        cursor = self.execute(
+            "UPDATE readings SET sound_rms = ? WHERE ts_utc = ?",
+            (sound_rms, ts_utc)
+        )
+        
+        # If no existing record, create new one with NULL values for other sensors
+        if cursor.rowcount == 0:
+            self.execute(
+                """INSERT INTO readings 
+                   (ts_utc, temp_f, humidity, pressure, lux, full_spectrum, ir, sound_rms) 
+                   VALUES (?, NULL, NULL, NULL, NULL, NULL, NULL, ?)""",
+                (ts_utc, sound_rms)
+            )
+        
         self.commit()
     
     def insert_minute_stats(self, ts_min: str, stats: Dict[str, float]):
         """Insert minute-level statistics"""
         self.execute(
             """INSERT OR REPLACE INTO minute_stats 
-               (ts_min, temp_f_med, temp_f_mad, temp_f_std, hum_med, hum_mad, hum_std, rows)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (ts_min, stats['temp_f_med'], stats['temp_f_mad'], stats['temp_f_std'],
-             stats['hum_med'], stats['hum_mad'], stats['hum_std'], stats['rows'])
+               (ts_min, temp_f_med, temp_f_mad, temp_f_std, hum_med, hum_mad, hum_std, 
+                lux_med, lux_mad, lux_std, sound_med, sound_mad, sound_std, rows)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (ts_min, 
+             stats.get('temp_f_med'), stats.get('temp_f_mad'), stats.get('temp_f_std'),
+             stats.get('hum_med'), stats.get('hum_mad'), stats.get('hum_std'),
+             stats.get('lux_med'), stats.get('lux_mad'), stats.get('lux_std'),
+             stats.get('sound_med'), stats.get('sound_mad'), stats.get('sound_std'),
+             stats['rows'])
         )
         self.commit()
     
