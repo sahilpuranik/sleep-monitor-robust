@@ -1,43 +1,27 @@
 #!/usr/bin/env python3
-"""
-Test Email Configuration
-Simple script to test email setup and send a test email
-"""
 
 import os
 import sys
-from pathlib import Path
 
-# Add current directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 from email_utils import EmailAlertManager
 
 def main():
-    """Test email configuration and send test email"""
-    print("Testing Email Configuration")
-    print("=" * 40)
+    print("Testing Email")
     
-    # Check environment variables
     smtp_user = os.getenv('SMTP_USER')
     smtp_pass = os.getenv('SMTP_PASS_APP')
     alert_to = os.getenv('ALERT_TO')
     
-    print("Environment Variables:")
-    print(f"   SMTP_USER: {'Set' if smtp_user else 'Not set'}")
-    print(f"   SMTP_PASS_APP: {'Set' if smtp_pass else 'Not set'}")
-    print(f"   ALERT_TO: {'Set' if alert_to else 'Not set'}")
+    print(f"SMTP_USER: {'Set' if smtp_user else 'Not set'}")
+    print(f"SMTP_PASS_APP: {'Set' if smtp_pass else 'Not set'}")
+    print(f"ALERT_TO: {'Set' if alert_to else 'Not set'}")
     
     if not all([smtp_user, smtp_pass, alert_to]):
-        print("\nEmail configuration incomplete!")
-        print("   Please set the required environment variables:")
-        print("   export SMTP_USER='your.email@gmail.com'")
-        print("   export SMTP_PASS_APP='your-app-password'")
-        print("   export ALERT_TO='alert.recipient@gmail.com'")
+        print("\nConfig incomplete")
         return
     
-    print(f"\nEmail Configuration:")
-    print(f"   From: {smtp_user}")
+    print(f"\nFrom: {smtp_user}")
     print(f"   To: {alert_to}")
     
     # Test connection

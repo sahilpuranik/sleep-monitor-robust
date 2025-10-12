@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""
-LLM utilities for Sleep Monitor
-Handles OpenAI API integration for human-readable alerts and root-cause analysis
-"""
 
 import os
 import logging
@@ -17,69 +13,55 @@ class LLMAlertEnhancer:
         self.enabled = bool(self.api_key)
         
         if not self.enabled:
-            logger.warning("OpenAI API key not found. Alerts will use raw format.")
+            logger.warning("No API key found")
         else:
-            logger.info("OpenAI integration enabled for enhanced alerts")
+            logger.info("OpenAI enabled")
     
     def enhance_anomaly_alert(self, anomalies: List[Dict[str, Any]], 
                             sensor_context: Optional[List[Dict[str, Any]]] = None) -> str:
-        """
-        Generate human-readable explanation for anomalies using OpenAI API
-        Returns enhanced alert text or falls back to raw format if API fails
-        """
         if not self.enabled or not anomalies:
             return self._fallback_alert_format(anomalies)
         
         try:
-            # Prepare context for LLM
             context = self._prepare_context(anomalies, sensor_context)
-            
-            # Generate explanation
             explanation = self._call_openai_api(context)
-            
             return explanation
-            
         except Exception as e:
-            logger.error(f"LLM enhancement failed: {e}")
+            logger.error(f"LLM failed: {e}")
             return self._fallback_alert_format(anomalies)
     
     def enhance_batch_anomaly_alert(self, anomalies: List[Dict[str, Any]], 
                                    sensor_context: Optional[List[Dict[str, Any]]] = None) -> str:
-        """
-        Generate human-readable explanation for batch anomalies using OpenAI API
-        Returns enhanced alert text or falls back to raw format if API fails
-        """
         if not self.enabled or not anomalies:
             return self._fallback_batch_alert_format(anomalies)
         
         try:
-            # Prepare context for LLM
             context = self._prepare_batch_context(anomalies, sensor_context)
-            
-            # Generate explanation
             explanation = self._call_openai_api(context)
-            
             return explanation
-            
         except Exception as e:
-            logger.error(f"LLM batch enhancement failed: {e}")
+            logger.error(f"Batch LLM failed: {e}")
             return self._fallback_batch_alert_format(anomalies)
     
     def _prepare_context(self, anomalies: List[Dict[str, Any]], 
                         sensor_context: Optional[List[Dict[str, Any]]]) -> str:
-        """Prepare context string for OpenAI API"""
+        from datetime import datetime as dt
         
-        # Basic anomaly information
         context = "Sleep environment anomalies detected:\n\n"
         
         for i, anomaly in enumerate(anomalies, 1):
-            context += f"{i}. {anomaly['metric'].upper()}: {anomaly['value']} "
+            try:
+                ts = dt.fromisoformat(anomaly['ts_utc'])
+                time_str = ts.strftime('%I:%M:%S %p PST')
+            except:
+                time_str = anomaly.get('ts_utc', 'Unknown time')
+            
+            context += f"{i}. [{time_str}] {anomaly['metric'].upper()}: {anomaly['value']} "
             context += f"(Rule: {anomaly['rule']}, Details: {anomaly['details']})\n"
         
-        # Add sensor context if available
         if sensor_context:
-            context += "\nRecent sensor readings (last 5 minutes):\n"
-            for reading in sensor_context[-10:]:  # Last 10 readings
+            context += "\nRecent sensor readings:\n"
+            for reading in sensor_context[-10:]:
                 context += f"  {reading['timestamp']}: Temp {reading['temp_f']:.1f}°F, "
                 context += f"Humidity {reading['humidity']:.1f}%, "
                 context += f"Pressure {reading['pressure']:.1f}hPa\n"
@@ -88,19 +70,23 @@ class LLMAlertEnhancer:
     
     def _prepare_batch_context(self, anomalies: List[Dict[str, Any]], 
                               sensor_context: Optional[List[Dict[str, Any]]]) -> str:
-        """Prepare context string for OpenAI API batch processing"""
+        from datetime import datetime as dt
         
-        # Basic anomaly information
         context = f"Sleep environment monitoring session completed with {len(anomalies)} total anomalies detected:\n\n"
         
         for i, anomaly in enumerate(anomalies, 1):
-            context += f"{i}. {anomaly['metric'].upper()}: {anomaly['value']} "
+            try:
+                ts = dt.fromisoformat(anomaly['ts_utc'])
+                time_str = ts.strftime('%I:%M:%S %p PST')
+            except:
+                time_str = anomaly.get('ts_utc', 'Unknown time')
+            
+            context += f"{i}. [{time_str}] {anomaly['metric'].upper()}: {anomaly['value']} "
             context += f"(Rule: {anomaly['rule']}, Details: {anomaly['details']})\n"
         
-        # Add sensor context if available
         if sensor_context:
-            context += "\nRecent sensor readings (last 5 minutes):\n"
-            for reading in sensor_context[-10:]:  # Last 10 readings
+            context += "\nRecent sensor readings:\n"
+            for reading in sensor_context[-10:]:
                 context += f"  {reading['timestamp']}: Temp {reading['temp_f']:.1f}°F, "
                 context += f"Humidity {reading['humidity']:.1f}%, "
                 context += f"Pressure {reading['pressure']:.1f}hPa\n"
@@ -108,43 +94,58 @@ class LLMAlertEnhancer:
         return context
     
     def _call_openai_api(self, context: str) -> str:
-        """Call OpenAI API to generate human-readable explanation"""
         try:
-            import openai
+            from openai import OpenAI
+            client = OpenAI(api_key=self.api_key)
             
-            # Set API key
-            openai.api_key = self.api_key
-            
-            # Create prompt
             if "monitoring session completed" in context:
                 prompt = f"""
 You are a sleep environment monitoring system. Analyze the following night's monitoring session and provide a clear, concise summary for the user.
 
+ROOM CONTEXT:
+- User lives near a major road, so noise levels can be high from traffic
+- Light comes through the window a little bit even when blinds are completely closed
+- AC is not allowed, but user has a fan available for temperature control
+
 {context}
 
-Provide:
-1. A brief summary of the night's monitoring results
-2. Overall patterns or trends in the anomalies
-3. Suggested actions if any
+Format your response EXACTLY like this for each anomaly:
 
-Keep the response under 250 words, use simple language, and focus on practical insights. Do not include technical jargon or statistical details.
+1. [TIME] - [What happened]
+   Potential cause: [explain why this happened, considering room context]
+   Potential fix: [suggest solution, remember: no AC, but fan is available]
+
+2. [TIME] - [What happened]
+   Potential cause: [explain why this happened, considering room context]
+   Potential fix: [suggest solution]
+
+Keep each explanation brief and practical. Use simple language. No technical jargon.
 """
             else:
                 prompt = f"""
 You are a sleep environment monitoring system. Analyze the following anomaly data and provide a clear, concise explanation for the user.
 
+ROOM CONTEXT:
+- User lives near a major road, so noise levels can be high from traffic
+- Light comes through the window a little bit even when blinds are completely closed
+- AC is not allowed, but user has a fan available for temperature control
+
 {context}
 
-Provide:
-1. A brief summary of what's happening
-2. Possible causes for each anomaly
-3. Suggested actions if any
+Format your response EXACTLY like this for each anomaly:
 
-Keep the response under 200 words, use simple language, and focus on practical insights. Do not include technical jargon or statistical details.
+1. [TIME] - [What happened]
+   Potential cause: [explain why this happened, considering room context]
+   Potential fix: [suggest solution, remember: no AC, but fan is available]
+
+2. [TIME] - [What happened]
+   Potential cause: [explain why this happened, considering room context]
+   Potential fix: [suggest solution]
+
+Keep each explanation brief and practical. Use simple language. No technical jargon.
 """
             
-            # Call OpenAI API
-            response = openai.ChatCompletion.create(
+            response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "You are a helpful sleep environment monitoring assistant."},
@@ -155,23 +156,21 @@ Keep the response under 200 words, use simple language, and focus on practical i
             )
             
             explanation = response.choices[0].message.content.strip()
-            
-            # Format the explanation
             return self._format_enhanced_alert(explanation)
             
         except ImportError:
-            logger.error("OpenAI library not installed. Run: pip install openai")
+            logger.error("OpenAI not installed")
             raise
         except Exception as e:
-            logger.error(f"OpenAI API call failed: {e}")
+            logger.error(f"API call failed: {e}")
             raise
     
     def _format_enhanced_alert(self, explanation: str) -> str:
-        """Format the LLM explanation into alert structure"""
-        current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        from datetime import timezone, timedelta
+        pst = timezone(timedelta(hours=-8))
+        current_time = datetime.now(pst).strftime("%Y-%m-%d %H:%M:%S PST")
         
-        formatted_alert = f"""
-SLEEP MONITOR ALERT
+        return f"""SLEEP MONITOR ALERT
 
 Time: {current_time}
 
@@ -180,14 +179,9 @@ AI ANALYSIS:
 
 ---
 Sleep Monitor System
-Raspberry Pi Environment Monitor
-This is an automated alert - please check your sleep environment.
-"""
-        
-        return formatted_alert.strip()
+""".strip()
     
     def _fallback_alert_format(self, anomalies: List[Dict[str, Any]]) -> str:
-        """Fallback to raw anomaly format if LLM is unavailable"""
         current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
         
         body = f"""
@@ -207,18 +201,10 @@ Anomalies Detected: {len(anomalies)}
    Details: {anomaly['details']}
 """
         
-        body += f"""
-
----
-Sleep Monitor System
-Raspberry Pi Environment Monitor
-This is an automated alert - please check your sleep environment.
-"""
-        
+        body += "\n---\nSleep Monitor System"
         return body.strip()
     
     def _fallback_batch_alert_format(self, anomalies: List[Dict[str, Any]]) -> str:
-        """Fallback to raw batch anomaly format if LLM is unavailable"""
         current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
         
         body = f"""
@@ -238,51 +224,37 @@ Total Anomalies Detected: {len(anomalies)}
    Details: {anomaly['details']}
 """
         
-        body += f"""
-
----
-Sleep Monitor System
-Raspberry Pi Environment Monitor
-This is an automated summary of your sleep environment monitoring session.
-"""
-        
+        body += "\n---\nSleep Monitor System"
         return body.strip()
 
 def test_llm_connection() -> bool:
-    """Test OpenAI API connection"""
     enhancer = LLMAlertEnhancer()
     
     if not enhancer.enabled:
-        print("OpenAI API key not configured. Set OPENAI_API_KEY environment variable.")
+        print("No API key set")
         return False
     
     try:
-        # Test with sample data
-        test_anomalies = [
-            {
-                'metric': 'temp_f',
-                'value': 75.2,
-                'rule': 'robust_z_score',
-                'details': 'Z-score: 7.61',
-                'ts_utc': datetime.utcnow().isoformat()
-            }
-        ]
+        test_anomalies = [{
+            'metric': 'temp_f',
+            'value': 75.2,
+            'rule': 'robust_z_score',
+            'details': 'Z-score: 7.61',
+            'ts_utc': datetime.utcnow().isoformat()
+        }]
         
         result = enhancer.enhance_anomaly_alert(test_anomalies)
         
         if "AI ANALYSIS:" in result:
-            print("OpenAI integration test successful!")
-            print("\nSample enhanced alert:")
+            print("Test successful")
             print(result)
             return True
         else:
-            print("OpenAI integration test failed - fallback format used")
+            print("Test failed")
             return False
-            
     except Exception as e:
-        print(f"OpenAI integration test failed: {e}")
+        print(f"Test failed: {e}")
         return False
 
 if __name__ == "__main__":
-    # Test LLM functionality
     test_llm_connection()

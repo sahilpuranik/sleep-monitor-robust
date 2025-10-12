@@ -1,37 +1,25 @@
 #!/usr/bin/env python3
-"""
-Test script for LLM integration
-Demonstrates enhanced alert formatting with OpenAI API
-"""
 
 import os
 import sys
 from datetime import datetime, timezone
 
-# Add current directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 from llm_utils import LLMAlertEnhancer, test_llm_connection
 
 def test_enhanced_alerts():
-    """Test enhanced alert formatting with sample data"""
+    print("Testing LLM")
     
-    print("Testing LLM-Enhanced Sleep Monitor Alerts")
-    print("=" * 50)
-    
-    # Check if API key is configured
     if not os.getenv('OPENAI_API_KEY'):
-        print("OPENAI_API_KEY not set. Set it to test LLM integration.")
-        print("Example: export OPENAI_API_KEY='sk-your-key-here'")
+        print("No API key set")
         return
     
-    # Test basic connection
-    print("\n1. Testing OpenAI API connection...")
+    print("Testing connection...")
     if not test_llm_connection():
-        print("API connection failed. Check your API key and internet connection.")
+        print("Connection failed")
         return
     
-    print("\n2. Testing enhanced alert formatting...")
+    print("Testing alerts...")
     
     # Create sample anomalies
     sample_anomalies = [
